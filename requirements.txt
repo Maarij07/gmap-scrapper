@@ -1,0 +1,4 @@
+selenium==4.27.1
+webdriver_manager==4.0.2
+gspread==6.1.2
+google-auth==2.24.0
