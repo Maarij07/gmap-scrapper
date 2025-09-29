@@ -150,16 +150,93 @@ class GoogleSheetsManager:
         except Exception as e:
             print(f"Failed to ensure headers: {e}")
     
-    def append_row(self, business: dict, columns: List[str]):
-        """Append a business row to the Google Sheet."""
+    def cleanup_sheet_alignment(self):
+        """Clean up any misaligned data by removing empty rows and ensuring proper structure."""
         try:
+            print("🧹 Checking for misaligned data...")
+            all_values = self.worksheet.get_all_values()
+            
+            # Count non-empty rows properly aligned
+            properly_aligned_rows = []
+            headers_found = False
+            
+            for i, row in enumerate(all_values, 1):
+                # Skip completely empty rows
+                if not any(cell.strip() for cell in row):
+                    continue
+                
+                # First non-empty row should be headers
+                if not headers_found:
+                    properly_aligned_rows.append(row)
+                    headers_found = True
+                    continue
+                
+                # For data rows, check if first column (name) has content
+                if row and row[0].strip():
+                    properly_aligned_rows.append(row)
+            
+            # If we found misalignment, recreate the sheet content
+            if len(properly_aligned_rows) != len([r for r in all_values if any(cell.strip() for cell in r)]):
+                print(f"📝 Found misaligned data. Fixing {len(all_values)} → {len(properly_aligned_rows)} rows")
+                
+                # Clear the sheet and rewrite with properly aligned data
+                self.worksheet.clear()
+                if properly_aligned_rows:
+                    # Update all at once for efficiency
+                    num_cols = len(properly_aligned_rows[0])
+                    if num_cols <= 26:
+                        end_col = chr(ord("A") + num_cols - 1)
+                    else:
+                        # Handle columns beyond Z (AA, AB, etc.)
+                        first_letter = chr(ord("A") + (num_cols - 1) // 26 - 1)
+                        second_letter = chr(ord("A") + (num_cols - 1) % 26)
+                        end_col = first_letter + second_letter
+                    
+                    range_name = f'A1:{end_col}{len(properly_aligned_rows)}'
+                    self.worksheet.update(values=properly_aligned_rows, range_name=range_name)
+                    print(f"✅ Sheet realigned: {len(properly_aligned_rows)} rows")
+            else:
+                print("✅ Sheet alignment looks good!")
+                
+        except Exception as e:
+            print(f"⚠️  Sheet cleanup failed (continuing anyway): {e}")
+    
+    def append_row(self, business: dict, columns: List[str]):
+        """Append a business row to the Google Sheet with proper alignment."""
+        try:
+            # Prepare the row data ensuring all columns are filled
             row = [str(business.get(col, '')) for col in columns]
-            self.worksheet.append_row(row)
-            print(f"  → Saved to Google Sheets: {business.get('name', 'Unknown')}")
+            
+            # Find the next available row (more reliable than append_row)
+            next_row = len(self.worksheet.col_values(1)) + 1
+            
+            # Insert the row at the specific row number to ensure proper alignment
+            # Calculate the end column letter properly
+            num_cols = len(columns)
+            if num_cols <= 26:
+                end_col = chr(ord("A") + num_cols - 1)
+            else:
+                # Handle columns beyond Z (AA, AB, etc.)
+                first_letter = chr(ord("A") + (num_cols - 1) // 26 - 1)
+                second_letter = chr(ord("A") + (num_cols - 1) % 26)
+                end_col = first_letter + second_letter
+            
+            range_name = f'A{next_row}:{end_col}{next_row}'
+            self.worksheet.update(values=[row], range_name=range_name)
+            
+            print(f"  → Saved to Google Sheets (Row {next_row}): {business.get('name', 'Unknown')}")
             return True
         except Exception as e:
             print(f"Failed to append to Google Sheets: {e}")
-            return False
+            # Fallback to the original method if the new one fails
+            try:
+                row = [str(business.get(col, '')) for col in columns]
+                self.worksheet.append_row(row)
+                print(f"  → Saved to Google Sheets (Fallback): {business.get('name', 'Unknown')}")
+                return True
+            except Exception as e2:
+                print(f"Both append methods failed: {e2}")
+                return False
 
 
 def extract_business_details(driver, wait):
@@ -478,6 +555,8 @@ def main():
                     'region', 'search_term', 'scraped_at'
                 ]
                 sheets_manager.ensure_headers(columns)
+                # Clean up any existing misaligned data
+                sheets_manager.cleanup_sheet_alignment()
                 print(f"✅ Connected to Google Sheets: {spreadsheet_name}")
             else:
                 sheets_manager = None
